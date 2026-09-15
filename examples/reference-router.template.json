@@ -1,0 +1,118 @@
+{
+  "version": 2,
+  "enabled": false,
+  "allowedProviders": [
+    "provider-a",
+    "provider-b"
+  ],
+  "stateFile": "/path/to/shared-state.json",
+  "cooldownBufferSeconds": 5,
+  "maxFallbackAttempts": 2,
+  "quotaGroups": {
+    "fast": {
+      "maxStarts": 6,
+      "windowSeconds": 15,
+      "cooldownSeconds": 45
+    }
+  },
+  "maxConcurrentPerProvider": {
+    "provider-a": 3,
+    "provider-b": 3
+  },
+  "roles": {
+    "scout": {
+      "models": [
+        "provider-a/model-primary",
+        "provider-b/model-fallback"
+      ],
+      "metadata": {
+        "validation": "unvalidated"
+      }
+    },
+    "coder": {
+      "models": [
+        "provider-a/model-primary",
+        "provider-b/model-fallback"
+      ],
+      "metadata": {
+        "validation": "unvalidated"
+      }
+    },
+    "heavy-coder": {
+      "models": [
+        "provider-a/model-primary",
+        "provider-b/model-fallback"
+      ],
+      "metadata": {
+        "validation": "unvalidated"
+      }
+    },
+    "test-writer": {
+      "models": [
+        "provider-a/model-primary",
+        "provider-b/model-fallback"
+      ],
+      "metadata": {
+        "validation": "unvalidated"
+      }
+    },
+    "fixer": {
+      "models": [
+        "provider-a/model-primary",
+        "provider-b/model-fallback"
+      ],
+      "metadata": {
+        "validation": "unvalidated"
+      }
+    },
+    "debugger": {
+      "models": [
+        "provider-a/model-primary",
+        "provider-b/model-fallback"
+      ],
+      "metadata": {
+        "validation": "unvalidated"
+      }
+    },
+    "requirements": {
+      "models": [
+        "provider-a/model-primary",
+        "provider-b/model-fallback"
+      ],
+      "metadata": {
+        "validation": "unvalidated"
+      }
+    },
+    "reviewer": {
+      "models": [
+        "provider-a/model-primary",
+        "provider-b/model-fallback"
+      ],
+      "metadata": {
+        "validation": "unvalidated"
+      }
+    },
+    "corporate-architect": {
+      "models": [
+        "provider-a/model-primary",
+        "provider-b/model-fallback"
+      ],
+      "metadata": {
+        "validation": "unvalidated"
+      }
+    },
+    "vision": {
+      "models": [
+        "provider-a/model-primary",
+        "provider-b/model-fallback"
+      ],
+      "metadata": {
+        "validation": "unvalidated"
+      }
+    }
+  },
+  "workflow": {
+    "reviewerIndependence": "manual-policy-check",
+    "activation": "manual-approval-only"
+  }
+}

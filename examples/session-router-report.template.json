@@ -1,0 +1,20 @@
+{
+  "schema": "router-evaluation/session-report/v1",
+  "status": "emitted|failed_closed",
+  "generatedAt": "<timestamp>",
+  "referenceHash": "<sha256>",
+  "roles": {
+    "<role>": {
+      "healthyModels": [
+        "provider/model"
+      ],
+      "failed": []
+    }
+  },
+  "privacy": {
+    "secrets": "not_present",
+    "endpoints": "not_present",
+    "rawBodies": "not_present"
+  },
+  "approvalRequired": true
+}
