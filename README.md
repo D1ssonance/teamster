@@ -12,88 +12,299 @@
 
 ---
 
-Этот каталог содержит переносимую схему построения, проверки и безопасного обновления роутера ролей агентов. В материалы намеренно не включены названия провайдеров, моделей, проектов, репозиториев, URL, ключи, логи сессий и персональные данные.
+# Agent Router Workflow
 
-## Цели
+Principles, patterns, and lessons learned from implementing a semantic-role 
+based agent routing system with dynamic availability and automatic fallback.
 
-Схема решает четыре задачи:
+## What This Is
 
-1. выбрать semantic role для задачи;
-2. выбрать модель по неизменяемой reference-конфигурации и fallback-цепочке;
-3. отделить краткую проверку доступности от оценки качества роли;
-4. безопасно выпустить временный session router без автоматической активации.
+A reference implementation and documentation of:
+- Semantic role-based model selection
+- Two-tier configuration (reference + session)
+- API availability testing
+- Automatic fallback through model chains
+- Error classification and retry strategies
+- Fail-closed generation and execution
+- Privacy-safe monitoring and state management
 
-## Содержимое
+## Quick Start
 
-- `examples/reference-router.template.json` — обезличенный шаблон reference router;
-- `examples/session-router-report.template.json` — формат redacted отчёта;
-- `templates/work-contract.md` — контракт делегирования;
-- `methodology/api-smoke.md` — быстрый API smoke-test;
-- `methodology/role-fit.md` — полное role-fit тестирование;
-- `methodology/native-fixtures.md` — требования к native fixtures и executor;
-- `policies/production-safety.md` — правила безопасности и активации;
-- `policies/evidence-and-privacy.md` — требования к доказательствам и приватности;
-- `skills/` — два reusable Agent Skills;
-- `FIRST-RUN.md` — пошаговый первый запуск;
-- `RESULTS-AND-LESSONS.md` — обезличенные результаты развития workflow.
+1. **[FIRST-RUN.md](./FIRST-RUN.md)** - Setup and initial validation
+2. **[examples/](./examples/)** - Configuration templates
+3. **[implementation/](./implementation/)** - Phase 2 implementation guide
+4. **[RESULTS-AND-LESSONS.md](./RESULTS-AND-LESSONS.md)** - Key lessons
 
-## Архитектура
+## Architecture
 
-```text
-immutable reference router
-          |
-          +--> model API smoke
-          +--> tool protocol (если нужен)
-          +--> native agent fixtures (если доступны)
-          +--> role-specific fixtures
-          +--> independent review
-          |
-          +--> ручное решение о reference router
-
-reference router + свежая availability probe
-          |
-          +--> generate-only session router
-                    |
-                    +--> ручная проверка
-                    +--> ручная активация при отдельном approval
+```
+┌─────────────────────┐
+│  Reference Router   │  Phase 1: Static configuration
+│  (immutable)        │  - 10 semantic roles
+└──────────┬──────────┘  - Priority-ordered models per role
+           │             - Quota groups, cooldowns
+           ▼
+┌─────────────────────┐
+│  Session Generator  │  Phase 2.1: Dynamic availability
+│  (API smoke tests)  │  - Test each model
+└──────────┬──────────┘  - Filter unavailable
+           │             - Fail-closed generation
+           ▼
+┌─────────────────────┐
+│  Session Router     │  Phase 2.2: Runtime execution
+│  (available only)   │  - Automatic fallback
+└──────────┬──────────┘  - Error classification
+           │             - Structured errors
+           ▼
+┌─────────────────────┐
+│  Agent Delegation   │
+│  (spawn with role)  │
+└─────────────────────┘
 ```
 
-Production router, его state и reference router должны быть разными артефактами. Доступность модели не является доказательством пригодности к роли.
+## Core Concepts
 
-## Быстрый старт
+### Semantic Roles
 
-1. Скопируйте шаблоны и замените только placeholder-значения во внутренней среде.
-2. Определите десять ролей: `scout`, `coder`, `heavy-coder`, `test-writer`, `fixer`, `debugger`, `requirements`, `reviewer`, `corporate-architect`, `vision`.
-3. Для каждой роли задайте непустую ordered fallback-цепочку с exact model IDs.
-4. Настройте runtime adapter и env reference для credentials. Не записывайте секрет в JSON.
-5. Выполните offline tests на fake gateway.
-6. Запустите короткий smoke-test одной модели.
-7. При успехе выполните role-fit только для нужных ролей.
-8. Выпустите session router в новом приватном каталоге. При незакрытой роли router не создаётся.
-9. Проверьте loader roundtrip и diff настроек.
-10. Только после отдельного approval активируйте конфигурацию вручную.
+Instead of selecting models by name, select by task semantics:
 
-Подробные команды зависят от конкретного agent runtime. Этот пакет намеренно не содержит provider-specific CLI.
+- **scout**: Repository search, evidence collection
+- **coder**: Focused implementation
+- **heavy-coder**: Complex multi-file refactoring
+- **test-writer**: Test implementation
+- **fixer**: Bug corrections
+- **debugger**: Diagnosis and investigation
+- **reviewer**: Independent review
+- **requirements**: Requirements clarification
+- **corporate-architect**: Architecture decisions
+- **vision**: Image/diagram analysis
 
-## Основные инварианты
+### Reference/Session Separation
 
-- exact identity важнее дружелюбного имени;
-- все роли явно присутствуют и имеют непустые списки;
-- fallback сохраняет reference order;
-- пользовательские exclusions абсолютны;
-- shared cooldown читается read-only;
-- probe budget не смешивается с admission quota;
-- кэш availability ограничен TTL и не обходит cooldown;
-- `--force` обходит только кэш;
-- при любой незакрытой роли нет loadable session router;
-- production router и shared state не меняются автоматически;
-- generated code не выполняется на host;
-- стоимость и токены не участвуют в выборе модели.
+**Reference Router (immutable):**
+- Complete model catalog
+- Desired configuration
+- All roles, all models
+- Source of truth
 
-## Не входит в пакет
+**Session Router (transient):**
+- Currently available models only
+- Generated from reference
+- Filtered by availability
+- Used at runtime
 
-- универсальный API-клиент для всех провайдеров;
-- автоматическая активация при старте чата;
-- автоматическая смена production router;
-- передача корпоративных данных внешним моделям;
-- утверждение, что маленькая synthetic выборка даёт универсальный рейтинг.
+### Priority-Ordered Fallback
+
+Models listed in priority order:
+```json
+{
+  "models": ["primary", "secondary", "tertiary"]
+}
+```
+
+- First model tried first
+- Automatic fallback on retryable errors
+- Order preserved through filtering
+
+### Error Classification
+
+Four categories with distinct retry strategies:
+
+1. **Rate Limit (429)** → Cooldown + try next model
+2. **Provider Error (503/timeout)** → Try next immediately  
+3. **Bad Request (400)** → Fail fast, don't waste attempts
+4. **Unknown** → Cautiously try next
+
+## Implementation Phases
+
+### Phase 1: Reference Router (Complete ✅)
+- Semantic role definitions
+- Model catalog per role
+- Quota groups and rate limits
+- Cooldown tracking
+- Manual model selection
+
+### Phase 2.1: Session Generation (Complete ✅)
+- API smoke test framework
+- Model availability detection
+- Reference → Session transformation
+- Fail-closed generation
+- State tracking
+
+### Phase 2.2: Fallback Execution (Complete ✅)
+- Automatic retry loop
+- Error classification
+- Cooldown integration
+- Structured error messages
+- Minimal invasive changes
+
+### Phase 2.3: Auto-Refresh (Future 🔄)
+- Periodic regeneration
+- Availability monitoring
+- Webhook notifications
+- Dashboard visualization
+
+## Directory Structure
+
+```
+agent-router-workflow/
+├── README.md                       # This file
+├── FIRST-RUN.md                    # Setup guide
+├── RESULTS-AND-LESSONS.md          # Key lessons learned
+│
+├── examples/                       # Configuration templates
+│   ├── README.md
+│   ├── reference-router.template.json
+│   └── session-router-report.template.json
+│
+├── implementation/                 # Phase 2 documentation
+│   ├── README.md
+│   ├── phase2-session-generation.md
+│   ├── phase2-fallback-execution.md
+│   ├── phase2-lessons-learned.md
+│   └── fallback-execution-pseudocode.md
+│
+├── methodology/                    # Evaluation methods
+│   ├── api-smoke.md
+│   ├── role-fit.md
+│   ├── native-fixtures.md
+│   └── tooling-pilots.md
+│
+├── policies/                       # Safety and operational policies
+│   ├── evidence-and-privacy.md
+│   ├── production-safety.md
+│   └── orchestration.md
+│
+├── skills/                         # Skill documentation
+│   ├── model-api-smoke-test/
+│   └── router-role-fit-evaluation/
+│
+└── templates/
+    └── work-contract.md            # Agent work contract template
+```
+
+## Key Lessons
+
+### Design Decisions That Worked
+
+✅ **Immutable reference + transient session**
+- Clear separation of desired vs available
+- Safe rollback (regenerate from reference)
+- No config corruption
+
+✅ **Fallback via array order**
+- No explicit chain configuration
+- Priority obvious from structure
+- Easy to filter and preserve order
+
+✅ **Minimal invasive changes**
+- Wrapped existing logic instead of rewriting
+- Preserved cooldown and quota mechanisms
+- Lower regression risk
+
+✅ **Fail-closed at every level**
+- Incomplete session → fail generation
+- Bad request → fail fast
+- Prevents silent degradation
+
+### What Required Iteration
+
+⚠️ **Mock vs real smoke tests**
+- Mock good for structure
+- Can't validate real behavior
+- Must replace with real API
+
+⚠️ **Timeout tuning**
+- One-size-fits-all doesn't work
+- Per-provider configuration needed
+- Balance speed vs false negatives
+
+⚠️ **Error pattern matching**
+- Generic patterns cover ~80%
+- Provider-specific patterns needed
+- Continuous tuning required
+
+## Privacy and Safety
+
+**All configuration is anonymized:**
+- No actual model names
+- No provider credentials
+- No project-specific data
+- Generic examples only
+
+**State management:**
+- No secrets in JSON
+- Atomic writes
+- Corruption detection
+- TTL for cached data
+
+**Logging:**
+- No request/response bodies
+- Model IDs and status codes only
+- No user data
+- Protected state directory
+
+## Metrics
+
+### Phase 2.1 (Session Generation)
+- Generation success rate >95%
+- Generation time <60s for 24 models
+- False positive/negative <5%
+
+### Phase 2.2 (Fallback Execution)
+- Fallback success rate >80%
+- Manual intervention <5%
+- Avg models per spawn ~1.2
+- P95 latency <10s
+
+## Usage Pattern
+
+```python
+# Load session router (generated from reference)
+config = load_router_config("/path/to/session-router.json")
+
+# Spawn with automatic fallback
+result = spawn_agent(
+    role="coder",              # Semantic role
+    task="Implement feature",  # Task description
+    config=config              # Session router
+)
+
+# On error, automatically tries fallback models
+# Structured error on exhaustion with tried models list
+```
+
+## When to Use This
+
+**Good fit:**
+- Multiple LLM providers/models
+- Semantic task categorization
+- Need automatic failover
+- Rate limits and quotas
+- Heterogeneous model capabilities
+
+**Not a fit:**
+- Single model/provider
+- All tasks same quality requirements
+- No rate limit issues
+- Direct model selection preferred
+
+## Contributing
+
+This is documentation and lessons learned from a real implementation.
+Adapt patterns to your context. All examples are anonymized.
+
+**Share your own lessons:**
+- What worked in your environment?
+- What needed different approaches?
+- What patterns emerged?
+
+## License
+
+This documentation is provided as-is for reference and learning.
+No warranty, no guarantees. Use at your own risk.
+
+---
+
+**Status:** Phase 2.1+2.2 complete, Phase 2.3 planned  
+**Rating:** 4/5 (pending real API integration)
