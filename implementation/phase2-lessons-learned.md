@@ -297,7 +297,7 @@ Session (runtime config)
 
 **Risk:** Fallback could be abused to bypass quota limits
 
-**Mitigation:** Count all attempts toward quota, check quota before loop
+**Mitigation:** Count all attempts toward quota, check quota for each model attempt inside the retry loop
 
 **Lesson:** Any retry mechanism needs quota integration.
 

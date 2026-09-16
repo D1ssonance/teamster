@@ -3,10 +3,28 @@
 This is anonymized pseudocode demonstrating the fallback execution pattern.
 Actual implementation details vary by runtime and language.
 
+## Exception Types
+
+```python
+class AuthenticationError(Exception):
+    """Authentication or authorization failure (401/403)."""
+    pass
+
+class CapacityError(Exception):
+    """All models exhausted or unavailable."""
+    pass
+
+class ValidationError(Exception):
+    """Invalid request that won't succeed on retry."""
+    pass
+```
+
+
+
 ## Core Pattern
 
 ```python
-def spawn_agent(role: str, task: str, config: Config) -> AgentResult:
+async def spawn_agent(role: str, task: str, config: Config) -> AgentResult:
     """
     Spawn agent with automatic fallback through model chain.
     
@@ -19,29 +37,35 @@ def spawn_agent(role: str, task: str, config: Config) -> AgentResult:
         AgentResult on success
     
     Raises:
-        CapacityError: All models exhausted
+        AuthenticationError: Authentication/authorization failure (401/403)
+        CapacityError: All models exhausted or unavailable
         ValidationError: Invalid request (fail-fast)
     """
     role_spec = config.roles[role]
-    max_attempts = len(role_spec.models)
-    tried_models = []
+    tried_models = []  # Track for logging/debugging
     last_error = None
     
-    # Retry loop through fallback chain
-    for attempt in range(max_attempts):
+    # Iterate through fallback chain by index (each index visited once)
+    # Note: models[] may contain duplicates; each occurrence tried separately
+    for model_index in range(len(role_spec.models)):
+        model = role_spec.models[model_index]
+        
+        # Check cooldown first (fast fail, no side effects)
+        # Then quota (may reserve slot, has side effects)
+        if is_on_cooldown(config, model):
+            continue
+        
+        tried_models.append(model)
+        
         try:
-            # Select next available model (not on cooldown)
-            model = select_next_available_model(config, role_spec)
-            tried_models.append(model)
-            
-            # Check quota before attempting
+            # Check quota before attempting spawn
             check_quota(config, role_spec)
             
             # Try to spawn with this model
             result = await runtime.spawn(
                 prompt=task,
                 model=model,
-                name=f"{role}-{attempt}"
+                name=f"{role}-{model_index}"
             )
             
             # Success!
@@ -51,70 +75,70 @@ def spawn_agent(role: str, task: str, config: Config) -> AgentResult:
             last_error = exc
             error_type = classify_error(exc)
             
-            if error_type == ErrorType.RATE_LIMIT:
-                # Mark model on cooldown, try next
+            # AUTH errors: configuration issue, abort immediately
+            if error_type == ErrorType.AUTH:
+                raise AuthenticationError(
+                    f"Authentication failed for model '{model}' in role '{role}'. "
+                    f"Check API keys and permissions. Error: {str(exc)[:200]}"
+                )
+            
+            # RATE_LIMIT: mark cooldown, try next model
+            elif error_type == ErrorType.RATE_LIMIT:
                 report_rate_limit(model, config)
                 continue
                 
+            # PROVIDER_ERROR: transient issue, try next model
             elif error_type == ErrorType.PROVIDER_ERROR:
-                # Provider issue, try next immediately
-                # (don't cooldown, might be transient)
+                # Don't cooldown - might be transient
+                # Model already in tried_models, won't retry
                 continue
                 
+            # BAD_REQUEST: task incompatible, fail fast
             elif error_type == ErrorType.BAD_REQUEST:
-                # Task incompatible, fail fast
-                # (don't try other models, same issue)
+                # Don't try other models - same issue will occur
                 raise
                 
+            # UNKNOWN: cautiously try next model
             else:  # ErrorType.UNKNOWN
-                # Cautiously try next model
+                # Model already in tried_models, won't retry
                 continue
     
-    # All models exhausted
+    # All models exhausted or skipped
+    if not tried_models:
+        raise CapacityError(
+            f"No available models for role '{role}'. "
+            f"All models on cooldown or quota exhausted."
+        )
+    
     raise CapacityError(
-        f"All {max_attempts} fallback attempt(s) for role '{role}' failed. "
+        f"All {len(tried_models)} fallback attempt(s) for role '{role}' failed. "
         f"Tried models: {', '.join(tried_models)}. "
         f"Last error: {type(last_error).__name__}: {str(last_error)[:100]}"
     )
 
 
-def select_next_available_model(config: Config, role_spec: RoleSpec) -> str:
+def is_on_cooldown(config: Config, model_id: str) -> bool:
     """
-    Select next model from role's model list that is not on cooldown.
+    Check if a specific model is currently on cooldown.
     
-    Models are tried in array order (priority order).
-    Returns first model not on cooldown.
+    Args:
+        config: Router configuration with state
+        model_id: Model to check
     
-    Raises:
-        CapacityError: All models on cooldown
+    Returns:
+        True if model is on cooldown, False if available
     """
     now = time.time()
+    cooldown = config.state.cooldowns.get(model_id)
     
-    for model_id in role_spec.models:
-        # Check if on cooldown
-        cooldown = config.state.cooldowns.get(model_id)
-        if cooldown and cooldown.until > now:
-            # Still on cooldown, skip
-            continue
-        
-        # Available!
-        return model_id
+    if cooldown and cooldown.until > now:
+        return True
     
-    # All on cooldown
-    wait_times = [
-        cooldown.until - now 
-        for cooldown in config.state.cooldowns.values()
-        if cooldown.until > now
-    ]
-    retry_after = min(wait_times) if wait_times else 60
-    
-    raise CapacityError(
-        f"All models for role '{role_spec.name}' on cooldown. "
-        f"Retry after {retry_after}s"
-    )
+    return False
 
 
 class ErrorType(Enum):
+    AUTH = "auth"  # Authentication/authorization failure (401/403)
     """Error classification for retry strategy."""
     RATE_LIMIT = "rate_limit"       # 429, quota exceeded
     PROVIDER_ERROR = "provider"     # 503, timeout, connection
@@ -127,17 +151,33 @@ def classify_error(exc: Exception) -> ErrorType:
     Classify error for retry strategy.
     
     Uses pattern matching on error message and type.
-    Adjust patterns based on actual provider responses.
+    For production: use structured HTTP status codes and typed exceptions.
+    
+    Returns:
+        AUTH: Authentication/authorization failure (401/403) - DO NOT RETRY
+        RATE_LIMIT: Rate limit hit (429) - mark cooldown, try next model
+        PROVIDER_ERROR: Provider/gateway error (50x, timeout) - try next model
+        BAD_REQUEST: Invalid request (400, 422) - likely won't succeed on retry
+        UNKNOWN: Unclassified error - try next model (policy: fail-slow)
     """
     message = str(exc).lower()
     
-    # Rate limit patterns
+    # Authentication/Authorization errors - DO NOT RETRY
+    # These indicate configuration issues, not transient failures
+    if any(pattern in message for pattern in [
+        "401", "403", "unauthorized", "forbidden",
+        "invalid api key", "authentication failed",
+        "permission denied", "access denied"
+    ]):
+        return ErrorType.AUTH
+    
+    # Rate limit patterns (429)
     if any(pattern in message for pattern in [
         "429", "rate limit", "quota exceeded", "too many requests"
     ]):
         return ErrorType.RATE_LIMIT
     
-    # Provider error patterns
+    # Provider error patterns (50x, connectivity)
     if any(pattern in message for pattern in [
         "503", "504", "timeout", "timed out", 
         "unavailable", "connection", "gateway"
@@ -217,7 +257,7 @@ config = load_router_config("/path/to/session-router.json")
 
 # Spawn with automatic fallback
 try:
-    result = spawn_agent(
+    result = await spawn_agent(
         role="coder",
         task="Implement user authentication flow",
         config=config
@@ -384,3 +424,262 @@ Total time: ~21s
 - Provider error formats
 - Authentication mechanisms
 - Concurrency requirements
+
+## Validation Test Cases
+
+### Test 1: Fallback on Provider Timeout
+
+Validates that timeout/503 errors advance through the fallback chain:
+
+```python
+def test_fallback_on_provider_timeout():
+    """
+    Verify that provider timeout triggers fallback to next model.
+    This test validates the fix for the original pseudocode bug.
+    """
+    # Setup: Two models in priority order
+    config = RouterConfig(
+        roles={
+            "coder": RoleSpec(
+                name="coder",
+                models=["provider-a/model-1", "provider-b/model-2"],
+                quotaGroup="standard"
+            )
+        }
+    )
+    
+    # Mock provider behavior
+    mock_runtime.set_behavior(
+        "provider-a/model-1",
+        error=ProviderTimeout("Connection timeout after 10s")
+    )
+    mock_runtime.set_behavior(
+        "provider-b/model-2",
+        success=AgentResult(model="provider-b/model-2", handle="agent-123")
+    )
+    
+    # Execute spawn
+    result = await spawn_agent(
+        role="coder",
+        task="Implement feature X",
+        config=config
+    )
+    
+    # Assertions
+    assert result.model == "provider-b/model-2", "Should fallback to model-2"
+    
+    # Verify call sequence
+    calls = mock_runtime.get_call_log()
+    assert len(calls) == 2, "Should try exactly 2 models"
+    assert calls[0].model == "provider-a/model-1", "First attempt: model-1"
+    assert calls[1].model == "provider-b/model-2", "Second attempt: model-2"
+    
+    # Verify model-1 NOT on cooldown (timeout doesn't trigger cooldown)
+    assert not is_on_cooldown(config, "provider-a/model-1")
+    
+    print("✅ Fallback on timeout works correctly")
+
+
+def test_no_infinite_retry_on_same_model():
+    """
+    Regression test: Ensure we don't retry the same model multiple times
+    when it returns non-cooldown errors.
+    
+    This validates the fix for the original bug where provider_error
+    would cause infinite retry on the same model.
+    """
+    config = RouterConfig(
+        roles={
+            "coder": RoleSpec(
+                name="coder",
+                models=["model-1", "model-2", "model-3"],
+                quotaGroup="standard"
+            )
+        }
+    )
+    
+    # All models fail with provider errors
+    for model in ["model-1", "model-2", "model-3"]:
+        mock_runtime.set_behavior(
+            model,
+            error=ProviderError("Service unavailable")
+        )
+    
+    # Should exhaust all models exactly once
+    with pytest.raises(CapacityError) as exc_info:
+        await spawn_agent(role="coder", task="test", config=config)
+    
+    # Verify error message
+    error_msg = str(exc_info.value)
+    assert "3 fallback attempt(s)" in error_msg
+    assert "model-1" in error_msg
+    assert "model-2" in error_msg
+    assert "model-3" in error_msg
+    
+    # Critical: Verify each model tried EXACTLY ONCE
+    calls = mock_runtime.get_call_log()
+    assert len(calls) == 3, "Should try each model exactly once"
+    assert calls[0].model == "model-1"
+    assert calls[1].model == "model-2"
+    assert calls[2].model == "model-3"
+    
+    # Verify NO model called more than once
+    call_counts = {}
+    for call in calls:
+        call_counts[call.model] = call_counts.get(call.model, 0) + 1
+    
+    for model, count in call_counts.items():
+        assert count == 1, f"{model} should be called exactly once, got {count}"
+    
+    print("✅ No infinite retry - each model tried exactly once")
+
+
+def test_rate_limit_triggers_cooldown_and_fallback():
+    """
+    Verify rate limit behavior: cooldown + fallback to next model.
+    """
+    config = RouterConfig(
+        roles={
+            "coder": RoleSpec(
+                name="coder", 
+                models=["model-1", "model-2"],
+                quotaGroup="standard"
+            )
+        },
+        quotaGroups={
+            "standard": QuotaGroup(
+                maxStarts=10,
+                windowSeconds=60,
+                cooldownSeconds=300
+            )
+        }
+    )
+    
+    # model-1 hits rate limit, model-2 succeeds
+    mock_runtime.set_behavior(
+        "model-1",
+        error=RateLimitError("Rate limit exceeded", retry_after=300)
+    )
+    mock_runtime.set_behavior(
+        "model-2",
+        success=AgentResult(model="model-2", handle="agent-456")
+    )
+    
+    result = await spawn_agent(role="coder", task="test", config=config)
+    
+    # Verify success with model-2
+    assert result.model == "model-2"
+    
+    # Verify model-1 IS on cooldown
+    assert is_on_cooldown(config, "model-1")
+    
+    # Verify cooldown duration ~= 300s
+    cooldown = config.state.cooldowns["model-1"]
+    assert 295 <= (cooldown.until - time.time()) <= 305
+    
+    print("✅ Rate limit triggers cooldown and fallback")
+```
+
+### Test 2: Bad Request Fails Fast
+
+```python
+def test_bad_request_fails_fast():
+    """
+    Verify that bad request (400) doesn't waste attempts on other models.
+    """
+    config = RouterConfig(
+        roles={
+            "coder": RoleSpec(
+                name="coder",
+                models=["model-1", "model-2", "model-3"],
+                quotaGroup="standard"
+            )
+        }
+    )
+    
+    # First model returns bad request
+    mock_runtime.set_behavior(
+        "model-1",
+        error=ValidationError("Invalid prompt format")
+    )
+    
+    # Other models would succeed (but shouldn't be tried)
+    mock_runtime.set_behavior("model-2", success=True)
+    mock_runtime.set_behavior("model-3", success=True)
+    
+    # Should fail immediately with ValidationError
+    with pytest.raises(ValidationError):
+        await spawn_agent(role="coder", task="malformed", config=config)
+    
+    # Critical: Only model-1 should be tried
+    calls = mock_runtime.get_call_log()
+    assert len(calls) == 1, "Should try only first model"
+    assert calls[0].model == "model-1"
+    
+    print("✅ Bad request fails fast without trying other models")
+```
+
+### Test 3: Skip Models on Cooldown
+
+```python
+def test_skip_models_on_cooldown():
+    """
+    Verify that models on cooldown are skipped during iteration.
+    """
+    config = RouterConfig(
+        roles={
+            "coder": RoleSpec(
+                name="coder",
+                models=["model-1", "model-2", "model-3"],
+                quotaGroup="standard"
+            )
+        }
+    )
+    
+    # Put model-1 on cooldown manually
+    config.state.cooldowns["model-1"] = CooldownEntry(
+        until=time.time() + 300,
+        reason="rate_limit"
+    )
+    
+    # model-2 succeeds
+    mock_runtime.set_behavior(
+        "model-2",
+        success=AgentResult(model="model-2", handle="agent-789")
+    )
+    
+    result = await spawn_agent(role="coder", task="test", config=config)
+    
+    # Should skip model-1, use model-2
+    assert result.model == "model-2"
+    
+    calls = mock_runtime.get_call_log()
+    assert len(calls) == 1
+    assert calls[0].model == "model-2"
+    
+    print("✅ Models on cooldown correctly skipped")
+```
+
+## Key Takeaways from Tests
+
+1. **Index-based iteration ensures forward progress**
+   - Each loop iteration advances to next model in array
+   - `tried_models` prevents accidental retries
+   - Works for ALL error types (timeout, 503, unknown)
+
+2. **Cooldown is selective**
+   - Only `rate_limit` triggers cooldown
+   - `provider_error`/`timeout` don't cooldown (might be transient)
+   - Cooldown models automatically skipped in next spawn
+
+3. **Fail-fast prevents waste**
+   - `bad_request` stops immediately
+   - Don't try other models for validation errors
+   - User gets immediate feedback
+
+4. **Structured errors provide context**
+   - List of tried models
+   - Last error details
+   - Clear capacity vs validation failure
+
+---

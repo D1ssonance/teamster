@@ -1,0 +1,92 @@
+{
+  "version": 2,
+  "provider": "corporate",
+  "defaultQuotaGroup": "standard",
+  "maxFallbackAttempts": 3,
+  "quotaGroups": {
+    "fast": {
+      "windowSeconds": 60,
+      "maxStarts": 3
+    },
+    "standard": {
+      "windowSeconds": 60,
+      "maxStarts": 2
+    }
+  },
+  "roles": {
+    "scout": {
+      "description": "Repository search and evidence collection",
+      "models": [
+        "devx/model-scout-v1",
+        "devx/model-scout-v2"
+      ],
+      "quotaGroup": "fast",
+      "maxFallbackAttempts": 2
+    },
+    "coder": {
+      "description": "Focused implementation tasks",
+      "models": [
+        "devx/model-coder-v1",
+        "devx/model-coder-v2"
+      ],
+      "quotaGroup": "standard"
+    },
+    "test-writer": {
+      "description": "Test implementation",
+      "models": [
+        "devx/model-test-v1"
+      ],
+      "quotaGroup": "standard"
+    },
+    "reviewer": {
+      "description": "Code review",
+      "models": [
+        "devx/model-reviewer-v1"
+      ],
+      "quotaGroup": "standard"
+    },
+    "debugger": {
+      "description": "Complex diagnosis",
+      "models": [
+        "devx/model-debugger-v1"
+      ],
+      "quotaGroup": "standard"
+    },
+    "fixer": {
+      "description": "Implement corrections",
+      "models": [
+        "devx/model-fixer-v1"
+      ],
+      "quotaGroup": "fast"
+    },
+    "heavy-coder": {
+      "description": "Multi-file implementation",
+      "models": [
+        "devx/model-heavy-v1"
+      ],
+      "quotaGroup": "standard"
+    },
+    "requirements": {
+      "description": "Requirements clarification",
+      "models": [
+        "devx/model-requirements-v1"
+      ],
+      "quotaGroup": "fast"
+    },
+    "corporate-architect": {
+      "description": "Architecture decisions",
+      "models": [
+        "devx/model-architect-v1"
+      ],
+      "quotaGroup": "standard"
+    },
+    "vision": {
+      "description": "Visual analysis",
+      "models": [
+        "devx/model-vision-v1"
+      ],
+      "quotaGroup": "standard"
+    }
+  },
+  "cooldownSeconds": 60
+}

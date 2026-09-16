@@ -1,4 +1,5 @@
 {
+  "$schema": "./schemas/reference-router.schema.json",
   "version": 2,
   "enabled": false,
   "allowedProviders": [
@@ -7,6 +8,7 @@
   ],
   "stateFile": "/path/to/shared-state.json",
   "cooldownBufferSeconds": 5,
+  "cooldownSeconds": 60,
   "maxFallbackAttempts": 2,
   "quotaGroups": {
     "fast": {
@@ -27,7 +29,8 @@
       ],
       "metadata": {
         "validation": "unvalidated"
-      }
+      },
+      "quotaGroup": "fast"
     },
     "coder": {
       "models": [
@@ -36,7 +39,8 @@
       ],
       "metadata": {
         "validation": "unvalidated"
-      }
+      },
+      "quotaGroup": "fast"
     },
     "heavy-coder": {
       "models": [
@@ -45,7 +49,8 @@
       ],
       "metadata": {
         "validation": "unvalidated"
-      }
+      },
+      "quotaGroup": "fast"
     },
     "test-writer": {
       "models": [
@@ -54,7 +59,8 @@
       ],
       "metadata": {
         "validation": "unvalidated"
-      }
+      },
+      "quotaGroup": "fast"
     },
     "fixer": {
       "models": [
@@ -63,7 +69,8 @@
       ],
       "metadata": {
         "validation": "unvalidated"
-      }
+      },
+      "quotaGroup": "fast"
     },
     "debugger": {
       "models": [
@@ -72,7 +79,8 @@
       ],
       "metadata": {
         "validation": "unvalidated"
-      }
+      },
+      "quotaGroup": "fast"
     },
     "requirements": {
       "models": [
@@ -81,7 +89,8 @@
       ],
       "metadata": {
         "validation": "unvalidated"
-      }
+      },
+      "quotaGroup": "fast"
     },
     "reviewer": {
       "models": [
@@ -90,7 +99,8 @@
       ],
       "metadata": {
         "validation": "unvalidated"
-      }
+      },
+      "quotaGroup": "fast"
     },
     "corporate-architect": {
       "models": [
@@ -99,7 +109,8 @@
       ],
       "metadata": {
         "validation": "unvalidated"
-      }
+      },
+      "quotaGroup": "fast"
     },
     "vision": {
       "models": [
@@ -108,7 +119,8 @@
       ],
       "metadata": {
         "validation": "unvalidated"
-      }
+      },
+      "quotaGroup": "fast"
     }
   },
   "workflow": {

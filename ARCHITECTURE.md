@@ -219,6 +219,96 @@ spawn(role="coder", task="...")
 - Includes test results
 - Timestamped for staleness detection
 
+
+## Concurrency & Thread Safety
+
+### Thread Safety Model
+
+**Single-Writer Assumption**: The router assumes a single writer per state file. Multiple concurrent router instances sharing the same `stateFile` require external coordination.
+
+### State File Access Patterns
+
+```
+Read operations:
+  • is_on_cooldown() - reads cooldown timestamps
+  • check_quota() - reads start history within time window
+  
+Write operations:
+  • set_cooldown() - writes new cooldown timestamp
+  • record_start() - appends start timestamp to quota group
+```
+
+### Safe Concurrency Patterns
+
+**Option 1: Single Router Instance (Recommended)**
+- One router process serves all spawn requests
+- State mutations are serialized within the process
+- Simplest and safest approach
+
+**Option 2: File Locking (Advanced)**
+```python
+import fcntl
+
+def with_state_lock(state_file_path):
+    """Advisory file lock for concurrent router instances"""
+    with open(state_file_path, 'r+') as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            # Read, modify, write state
+            yield f
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+```
+
+**Option 3: Separate State Files**
+- Each router instance uses its own state file
+- Quota enforcement becomes per-instance, not global
+- Acceptable if quota limits are generous
+
+### Race Conditions
+
+**Quota Check Race**:
+```
+Time T0: Router A checks quota → 5/6 used, OK
+Time T1: Router B checks quota → 5/6 used, OK
+Time T2: Router A spawns → 6/6 used
+Time T3: Router B spawns → 7/6 OVER LIMIT
+```
+
+**Mitigation**: File locking or atomic check-and-increment operations.
+
+**Cooldown Race**:
+```
+Time T0: Router A sets cooldown for model X
+Time T1: Router B reads stale state (no cooldown)
+Time T2: Router B attempts model X → rate limit error
+```
+
+**Mitigation**: Cooldown buffer (`cooldownBufferSeconds`) provides safety margin.
+
+### Crash Recovery
+
+**State File Corruption**:
+- Corrupted JSON → router cannot start
+- Solution: Validate state on load, fall back to empty state
+- Keep backup: `state.json.backup`
+
+**Orphaned Cooldowns**:
+- Process crash leaves cooldown active
+- Manual intervention: delete cooldown or wait for expiry
+
+**Stale Start Records**:
+- Old timestamps outside window accumulate
+- Solution: Prune timestamps older than max window on load
+
+### Production Recommendations
+
+1. **Use single router instance** when possible
+2. **Implement file locking** if multiple instances required
+3. **Monitor state file size** - prune old data periodically
+4. **Validate state on load** - handle corruption gracefully
+5. **Log all state mutations** for debugging race conditions
+
 ## Error Flow
 
 ### Generation Errors

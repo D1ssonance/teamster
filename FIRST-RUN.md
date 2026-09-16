@@ -1,90 +1,132 @@
-# Первый запуск
+# First Run Instructions
 
-## 1. Подготовьте runtime
+## Prerequisites
 
-Нужны:
+1. **Check configuration files**:
+   - `reference-router.json` - reference router with role definitions
+   - `session-router-*.json` - generated session routers (if any exist)
 
-- agent runtime с semantic-role adapter;
-- exact model registry без секретов в экспортируемых файлах;
-- runtime-only credential references;
-- отдельные каталоги для reference, session outputs, cache и shared state;
-- локальный fake gateway для offline tests;
-- sandboxed executor для native fixtures, если тестируется код.
+2. **Verify model availability**:
+   - All models in `reference-router.json` must be accessible through your gateway
+   - Check authentication and endpoint configuration
 
-Не меняйте production router на этапе подготовки.
+## Quick Start
 
-## 2. Создайте reference router
+### Step 1: Inspect Reference Router
 
-Начните с `examples/reference-router.template.json`.
+```bash
+cat reference-router.json
+```
 
-Для каждой роли:
+Verify:
+- Role definitions are correct
+- Model identifiers match your gateway
+- Quota groups are configured (if using quota management)
+- Rate limits are reasonable for your environment
 
-- укажите exact IDs;
-- расположите их по приоритету;
-- не смешивайте availability и role quality;
-- сохраните все non-model settings;
-- добавьте metadata о том, какие роли реально проверены.
+### Step 2: Generate Session Router
 
-Reference router должен быть immutable после принятия. Новые измерения записываются в assessment run, а не прямо в reference.
+Run the session router generator:
 
-## 3. Запустите offline проверки
+```bash
+python3 session_router_generator.py \
+  --reference reference-router.json \
+  --output session-router-$(date +%Y%m%d-%H%M%S).json
+```
 
-Минимум:
+This will:
+- Load the reference router
+- Generate session-specific configuration
+- Save to a timestamped session file
+- Report generation status
 
-- schema validation;
-- unknown/duplicate/missing model tests;
-- all-role explicitness;
-- exclusion tests;
-- settings preservation;
-- loader roundtrip;
-- fake gateway cache, retry and fail-closed tests;
-- privacy scan.
+### Step 3: Test Basic Functionality
 
-## 4. Запустите API smoke
+#### Test 1: Verify session router is valid
 
-Начните с одной модели и 1–3 deterministic cases. Заранее зафиксируйте:
+```bash
+python3 -c "import json; print(json.load(open('session-router.json'))['meta']['version'])"
+```
 
-- cap;
-- timeout;
-- retry policy;
-- model ID;
-- adapter/protocol;
-- input hashes;
-- expected output contract.
+Expected: Should print version number without errors
 
-Live inference требует отдельного approval. Каждая попытка, включая retry, считается в cap.
+#### Test 2: Check model fallback chains
 
-## 5. Запустите role-fit
+```bash
+python3 -c "
+import json
+router = json.load(open('session-router.json'))
+for role, config in router['roles'].items():
+    print(f'{role}: {len(config["models"])} models')
+"
+```
 
-Выберите только роли, для которых есть fixture и acceptance criteria. Не объявляйте остальные роли проваленными: они остаются `unvalidated`.
+Expected: Each role should show its fallback chain length
 
-Проверяйте exact identity и отсутствие fallback/substitution. После завершения нужен независимый review.
+### Step 4: Integration Test (Pseudocode)
 
-## 6. Выпустите session router
+Use your agent framework to test role-based spawning:
 
-Availability refresh должен:
+```python
+# Pseudocode - adapt to your framework
+agent_runtime = YourAgentRuntime(router_path='session-router-*.json')
 
-- читать reference;
-- дедуплицировать модели;
-- соблюдать reference order;
-- учитывать shared cooldown read-only;
-- пользоваться cache TTL не более пяти минут;
-- не обходить cooldown при force;
-- остановиться без router при незакрытой роли;
-- записать redacted report даже при отказе.
+# Test spawning with each role
+for role in ['scout', 'coder', 'reviewer']:
+    try:
+        child = await agent_runtime.spawn(
+            role=role,
+            objective='Test task',
+            read_scope=['/workspace/test']
+        )
+        print(f'{role}: ✓ spawned successfully')
+    except Exception as e:
+        print(f'{role}: ✗ failed - {e}')
+```
 
-Output directory должен быть новым, приватным и не совпадать с production/reference/state.
+## Common Issues
 
-## 7. Активация
+### Issue 1: Model not found
 
-Активация только вручную после проверки:
+**Symptom**: Error during spawn: "Model X not available"
 
-- loader roundtrip;
-- всех десяти ролей;
-- непустых цепочек;
-- сохранности non-model settings;
-- exclusions;
-- source/input hashes;
-- reviewer independence policy.
+**Fix**:
+1. Check model identifier in reference router
+2. Verify gateway access to that model
+3. Update reference router if model was renamed/removed
+4. Regenerate session router
 
-Переменная окружения активации должна задаваться в том же runtime, где запускаются дочерние агенты. Наследование в глубоко вложенных процессах нужно проверить отдельно и не считать гарантированным.
+### Issue 2: Quota exhausted immediately
+
+**Symptom**: First spawn fails with quota error
+
+**Fix**:
+1. Check `maxStarts` in quota group config
+2. Verify no leaked reservations from previous runs
+3. Increase quota limits if needed
+4. Implement cleanup of stale reservations
+
+### Issue 3: Rate limit triggered unexpectedly
+
+**Symptom**: Cooldown applied on first spawn
+
+**Fix**:
+1. Check cooldown state file for stale entries
+2. Verify cooldown duration is reasonable
+3. Clear state file if corrupted
+4. Adjust `windowSeconds` in rate limit config
+
+## Next Steps
+
+1. Read `ARCHITECTURE.md` - understand the two-tier design
+2. Read `implementation/fallback-execution-pseudocode.md` - see the retry logic
+3. Check `ERRATA.md` - known issues and fixes
+4. Review `methodology/` - testing and evaluation procedures
+
+## Support
+
+If issues persist:
+1. Check logs for detailed error messages
+2. Verify state files aren't corrupted
+3. Review configuration against templates
+4. Test with minimal single-role config first

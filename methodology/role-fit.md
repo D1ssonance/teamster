@@ -1,45 +1,166 @@
-# Методика полного role-fit тестирования
+# Role-Fit Evaluation Methodology
 
-## Стадии
+## Purpose
 
-1. preflight и exact identity;
-2. API smoke;
-3. tools, если роль использует tools;
-4. native agent, если runtime это поддерживает;
-5. role-specific deterministic fixtures;
-6. независимый review;
-7. role matrix и recommendation.
+Determine whether a model is suitable for specific agent roles based on capability requirements, not just API availability.
 
-## Role matrix
+## Scope
 
-`validated` — все обязательные стадии прошли.
+Test role-specific capabilities:
+- **Scout**: Search, file inspection, pattern matching
+- **Coder**: Code generation, stdlib usage, error handling
+- **Reviewer**: Code analysis, issue detection, improvement suggestions
+- **Test-writer**: Test generation, edge case coverage
+- **Debugger**: Root cause analysis, hypothesis testing
+- **Heavy-coder**: Multi-file refactoring, architecture changes
 
-`partially_validated` — часть стадий прошла, gaps перечислены.
+**Not tested**: Performance optimization, cost efficiency, latency
 
-`unvalidated` — недостаточно evidence.
+## Test Procedure
 
-`unavailable` — route не дал usable response.
+### Phase 1: Tool Protocol Test
 
-`incompatible` — протокол или request отвергнут.
+Verify model supports required tool calling format:
 
-`failed` — route работал, но role fixture провален.
+```json
+{
+  "model": "provider/model-name",
+  "messages": [...],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Read file contents",
+        "parameters": {"type": "object", "properties": {...}}
+      }
+    }
+  ]
+}
+```
 
-## Минимальные fixtures
+**Success**: Model returns valid `tool_calls` in response  
+**Failure**: Model doesn't support tools or returns invalid structure
 
-- `scout`: правильные files/symbols/edges без выдуманных ссылок;
-- `requirements`: выявление material ambiguity и сохранение ограничений;
-- `coder`, `heavy-coder`: implementation + targeted checks;
-- `test-writer`: тест ловит seeded defect и проверяет production behavior;
-- `debugger`: diagnosis совпадает с injected defect и trace/state;
-- `fixer`: минимальный fix проходит buggy, correct и partial-fix variants;
-- `reviewer`: seeded defect detection и severity;
-- `corporate-architect`: evidence-based options/trade-offs;
-- `vision`: реальный image/diagram input.
+### Phase 2: Native Agent Test
 
-## Правила интерпретации
+Test model as agent in minimal task:
 
-API healthy не означает role-qualified. Tool failure API не доказывает native failure. Vision text probe не доказывает vision capability. Небольшая synthetic выборка годится для reversible pilot, но не для универсального рейтинга.
+```python
+# Pseudocode
+agent = spawn_agent(
+    model="provider/model-name",
+    objective="Find all TODO comments in src/",
+    read_scope=["/workspace/src"],
+    tools=["read_file", "search_files"]
+)
 
-## Повторы
+result = await agent.complete()
+```
 
-Не повторяйте завершённые cases для улучшения оценки. Повтор разрешён только при ambiguity или plausibly transient failure. При восстановлении после interruption сначала сверяйте receipts и starts, затем решайте, что допустимо повторить.
+**Success**: Agent completes task and sends valid result  
+**Failure**: Agent fails, loops, or produces invalid output
+
+### Phase 3: Role-Specific Tests
+
+Each role has specific test scenarios:
+
+#### Scout Test
+
+**Task**: "Find all implementations of interface X"
+
+**Capabilities tested**:
+- File search
+- Content inspection
+- Pattern matching
+- Result summarization
+
+**Pass criteria**:
+- Found all implementations
+- No false positives
+- Concise summary provided
+
+#### Coder Test
+
+**Task**: "Add logging to function Y"
+
+**Capabilities tested**:
+- Code reading
+- Modification in place
+- Syntax correctness
+- Style consistency
+
+**Pass criteria**:
+- Code compiles/runs
+- Logging added correctly
+- Original behavior preserved
+- Style matches project
+
+#### Reviewer Test
+
+**Task**: "Review PR for security issues"
+
+**Capabilities tested**:
+- Multi-file analysis
+- Issue detection
+- Severity assessment
+- Recommendation quality
+
+**Pass criteria**:
+- Found real issues
+- No false positives (or minimal)
+- Severity ratings reasonable
+- Actionable recommendations
+
+## Scoring
+
+Each role receives:
+- **PASS**: Meets all criteria
+- **PARTIAL**: Meets some criteria, usable with supervision
+- **FAIL**: Does not meet basic requirements
+
+Example output:
+
+```
+Model: provider/model-name
+├─ Tool Protocol: PASS
+├─ Native Agent: PASS
+└─ Role Fit:
+   ├─ scout: PASS
+   ├─ coder: PASS
+   ├─ reviewer: PARTIAL (missed 1/3 issues)
+   ├─ test-writer: PASS
+   ├─ debugger: FAIL (no hypothesis testing)
+   └─ heavy-coder: PASS
+```
+
+## Integration with Router
+
+Role-fit results determine role-to-model mappings:
+
+```json
+{
+  "roles": {
+    "scout": {
+      "models": ["model-a", "model-b"]  // Both passed scout test
+    },
+    "coder": {
+      "models": ["model-a"]  // Only model-a passed coder test
+    },
+    "reviewer": {
+      "models": ["model-a", "model-c"]  // model-a full pass, model-c partial
+    }
+  }
+}
+```
+
+## Limitations
+
+- Tests use synthetic tasks, not production workload
+- Single test may not represent all scenarios
+- Model behavior can vary with prompt phrasing
+- Performance characteristics not measured
+- Cost not considered in fit evaluation
+
+**Use this for**: Role assignment decisions  
+**Use monitoring for**: Production performance validation

@@ -38,28 +38,50 @@ A reference implementation and documentation of:
 ## Architecture
 
 ```
-┌─────────────────────┐
-│  Reference Router   │  Phase 1: Static configuration
-│  (immutable)        │  - 10 semantic roles
-└──────────┬──────────┘  - Priority-ordered models per role
-           │             - Quota groups, cooldowns
-           ▼
-┌─────────────────────┐
-│  Session Generator  │  Phase 2.1: Dynamic availability
-│  (API smoke tests)  │  - Test each model
-└──────────┬──────────┘  - Filter unavailable
-           │             - Fail-closed generation
-           ▼
-┌─────────────────────┐
-│  Session Router     │  Phase 2.2: Runtime execution
-│  (available only)   │  - Automatic fallback
-└──────────┬──────────┘  - Error classification
-           │             - Structured errors
-           ▼
-┌─────────────────────┐
-│  Agent Delegation   │
-│  (spawn with role)  │
-└─────────────────────┘
+agent-router-workflow/
+├── README.md
+├── ARCHITECTURE.md
+├── INSTALLATION.md
+├── FIRST-RUN.md
+├── MONITORING.md
+├── MIGRATION.md
+├── REPRODUCIBILITY.md
+├── CHANGES.md
+├── FIX-SUMMARY.md
+├── reference-router.json
+├── reference-router.template.json
+├── session-router-report.template.json
+├── session_router_generator.py
+├── router_core.py
+├── examples/
+│   ├── README.md
+│   └── work-contract.md
+├── implementation/
+│   ├── README.md
+│   ├── fallback-execution-pseudocode.md
+│   └── ERRATA.md
+├── operations/
+│   ├── README.md
+│   ├── troubleshooting.md
+│   ├── state-recovery.md
+│   ├── rollback.md
+│   ├── quota-configuration.md
+│   └── error-classification.md
+├── phase2/
+│   ├── README.md
+│   ├── phase2-session-generation.md
+│   ├── phase2-fallback-execution.md
+│   └── RESULTS-AND-LESSONS.md
+├── policies/
+│   ├── README.md
+│   ├── production-safety.md
+│   └── privacy-guidelines.md
+├── schemas/
+│   ├── README.md
+│   └── reference-router.schema.json
+└── tests/
+    ├── README.md
+    └── test_router.py
 ```
 
 ## Core Concepts
@@ -148,39 +170,64 @@ Four categories with distinct retry strategies:
 
 ```
 agent-router-workflow/
-├── README.md                       # This file
-├── FIRST-RUN.md                    # Setup guide
-├── RESULTS-AND-LESSONS.md          # Key lessons learned
+├── README.md                           # Quick start and overview
+├── ARCHITECTURE.md                     # System design and components
+├── FIRST-RUN.md                        # Initial setup guide
+├── INSTALLATION.md                     # Installation steps
+├── MIGRATION.md                        # Migration scenarios
+├── MONITORING.md                       # Metrics and alerting
+├── REPRODUCIBILITY.md                  # Implementation estimate
+├── RESULTS-AND-LESSONS.md              # Evaluation results
+├── REVIEW.md                           # Code review findings
+├── SHARING.md                          # Distribution guide
+├── CHANGES.md                          # Change log
+├── ERRATA.md                           # Known bugs and fixes
 │
-├── examples/                       # Configuration templates
+├── implementation/                     # Phase 2 documentation
 │   ├── README.md
-│   ├── reference-router.template.json
+│   ├── fallback-execution-pseudocode.md    # Canonical logic
+│   ├── phase2-session-generation.md        # Phase 2.1
+│   ├── phase2-fallback-execution.md        # Phase 2.2
+│   └── phase2-lessons-learned.md
+│
+├── methodology/                        # Evaluation methods
+│   ├── api-smoke.md                    # API testing approach
+│   ├── role-fit.md                     # Role evaluation
+│   ├── native-fixtures.md              # Test fixtures
+│   └── tooling-pilots.md               # Tool integration
+│
+├── operations/                         # Operational procedures
+│   ├── README.md
+│   ├── troubleshooting.md              # Common issues and solutions
+│   ├── state-recovery.md               # State file recovery
+│   ├── rollback.md                     # Configuration rollback
+│   ├── quota-configuration.md          # Quota tuning guide
+│   └── error-classification.md         # Error handling patterns
+│
+├── policies/                           # Safety and workflow policies
+│   ├── orchestration.md                # Workflow and delegation
+│   ├── production-safety.md            # Safety guidelines
+│   └── evidence-and-privacy.md         # Privacy rules
+│
+├── schemas/                            # JSON Schema definitions
+│   ├── README.md
+│   └── reference-router.schema.json    # Router config schema
+│
+├── templates/                          # Configuration templates
+│   ├── work-contract.md                # Work contract template
+│   ├── reference-router.template.json  # Router config template
 │   └── session-router-report.template.json
 │
-├── implementation/                 # Phase 2 documentation
-│   ├── README.md
-│   ├── phase2-session-generation.md
-│   ├── phase2-fallback-execution.md
-│   ├── phase2-lessons-learned.md
-│   └── fallback-execution-pseudocode.md
+├── examples/                           # Usage examples
+│   └── README.md
 │
-├── methodology/                    # Evaluation methods
-│   ├── api-smoke.md
-│   ├── role-fit.md
-│   ├── native-fixtures.md
-│   └── tooling-pilots.md
-│
-├── policies/                       # Safety and operational policies
-│   ├── evidence-and-privacy.md
-│   ├── production-safety.md
-│   └── orchestration.md
-│
-├── skills/                         # Skill documentation
-│   ├── model-api-smoke-test/
-│   └── router-role-fit-evaluation/
-│
-└── templates/
-    └── work-contract.md            # Agent work contract template
+└── skills/                             # Skill documentation
+    ├── model-api-smoke-test/
+    │   ├── SKILL.md
+    │   └── references/protocol.md
+    └── router-role-fit-evaluation/
+        ├── SKILL.md
+        └── references/protocol.md
 ```
 
 ## Key Lessons
@@ -248,7 +295,7 @@ agent-router-workflow/
 
 ### Phase 2.1 (Session Generation)
 - Generation success rate >95%
-- Generation time <60s for 24 models
+- Generation time <60s (tested with 10 roles, 2-3 models each)
 - False positive/negative <5%
 
 ### Phase 2.2 (Fallback Execution)
@@ -264,7 +311,7 @@ agent-router-workflow/
 config = load_router_config("/path/to/session-router.json")
 
 # Spawn with automatic fallback
-result = spawn_agent(
+result = await spawn_agent(
     role="coder",              # Semantic role
     task="Implement feature",  # Task description
     config=config              # Session router
@@ -307,4 +354,6 @@ No warranty, no guarantees. Use at your own risk.
 ---
 
 **Status:** Phase 2.1+2.2 complete, Phase 2.3 planned  
-**Rating:** 4/5 (pending real API integration)
+**Errata:** Pseudocode fallback logic fixed 2025-01-15 (see [ERRATA.md](./ERRATA.md))  
+**Rating:** 4/5 (pending real API integration)  
+**Last Updated:** 2025-01-15

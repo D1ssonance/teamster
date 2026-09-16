@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Agent Router Configuration",
+  "type": "object",
+  "required": [
+    "version",
+    "cooldownSeconds",
+    "quotaGroups",
+    "roles"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "enum": [
+        2
+      ],
+      "description": "Router configuration schema version"
+    },
+    "cooldownSeconds": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Default cooldown duration in seconds"
+    },
+    "maxFallbackAttempts": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Global default for maximum fallback attempts"
+    },
+    "quotaGroups": {
+      "type": "object",
+      "patternProperties": {
+        ".*": {
+          "type": "object",
+          "required": [
+            "windowSeconds",
+            "maxStarts"
+          ],
+          "properties": {
+            "windowSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxStarts": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    "roles": {
+      "type": "object",
+      "patternProperties": {
+        ".*": {
+          "type": "object",
+          "required": [
+            "models",
+            "quotaGroup"
+          ],
+          "properties": {
+            "models": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "quotaGroup": {
+              "type": "string"
+            },
+            "maxFallbackAttempts": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

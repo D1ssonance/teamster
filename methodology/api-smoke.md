@@ -1,40 +1,102 @@
-# Методика быстрого API smoke-test
+# API Smoke Test Methodology
 
-## Назначение
+## Purpose
 
-Smoke-test отвечает только на вопрос: «отвечает ли exact model через данный adapter сейчас?» Он не отвечает на вопрос о пригодности для роли.
+Quick validation that a model is reachable through the gateway and responds to basic requests. This is the first gate before role-fit evaluation.
 
-## Протокол
+## Scope
 
-1. Resolve exact provider/model/adapter identity.
-2. Проверьте exclusions и approval на live inference.
-3. Зафиксируйте manifest и hard attempt cap.
-4. Используйте 1–3 deterministic cases.
-5. Запускайте serially, если нет доказанной необходимости в concurrency.
-6. Разрешите максимум один retry для timeout/network/transient 5xx.
-7. Не retry 400, 401, 403, 404, 429.
-8. Count every underlying HTTP attempt.
-9. Redact report before writing.
+- Gateway connectivity
+- Authentication
+- Basic chat completion
+- Response structure validity
+- Latency threshold check
 
-## Классификация
+**Not tested**: Tool calling, reasoning quality, role-specific capabilities
 
-Разделяйте:
+## Test Procedure
 
-- healthy;
-- empty;
-- truncated;
-- incompatible request/model route;
-- auth/permission;
-- rate limited;
-- transient server/network/timeout;
-- malformed/unknown response.
+### Input
 
-Не превращайте unavailable в quality score 0.
+- Model identifier (e.g., `provider/model-name`)
+- Gateway endpoint
+- Authentication credentials
+- Timeout threshold (default: 30s)
 
-## Отчёт
+### Test Case
 
-Храните exact ID, adapter, timestamp, cap, attempts, first-attempt success, retry recovery, latency, error categories, fixture/input hashes и ограничения. Не храните URL, headers, keys, raw body или raw exception.
+Send minimal chat completion request:
 
-## Для новых внешних моделей
+```json
+{
+  "model": "provider/model-name",
+  "messages": [
+    {"role": "user", "content": "Reply with: OK"}
+  ],
+  "max_tokens": 10,
+  "temperature": 0
+}
+```
 
-Не подставляйте внешнюю модель в корпоративный harness только из-за похожего протокола. Используйте фактический adapter агента или отдельный локальный adapter с теми же safety guarantees.
+### Success Criteria
+
+1. **HTTP 200**: Request completed successfully
+2. **Valid structure**: Response contains `choices[0].message.content`
+3. **Non-empty response**: Content is not empty or whitespace
+4. **Latency acceptable**: Response within timeout threshold
+5. **No auth errors**: No 401/403 status codes
+
+### Failure Classification
+
+- **AUTH_FAILURE**: 401/403 status code
+- **NOT_FOUND**: 404 status code (model not available)
+- **TIMEOUT**: Request exceeded timeout threshold
+- **INVALID_RESPONSE**: Missing expected fields in response
+- **GATEWAY_ERROR**: 500/502/503 gateway errors
+- **UNKNOWN**: Other errors
+
+## Expected Output
+
+### Success
+
+```
+✓ Model: provider/model-name
+  Status: AVAILABLE
+  Latency: 450ms
+  Response: OK
+```
+
+### Failure
+
+```
+✗ Model: provider/model-name
+  Status: AUTH_FAILURE
+  Error: 401 Unauthorized
+  Message: Invalid API key
+```
+
+## Usage in Router Evaluation
+
+API smoke test runs before role-fit evaluation:
+
+```
+Phase 1: API Smoke Test
+├─ provider/model-a → ✓ AVAILABLE (380ms)
+├─ provider/model-b → ✗ AUTH_FAILURE
+└─ provider/model-c → ✓ AVAILABLE (520ms)
+
+Phase 2: Role Fit (only for available models)
+├─ provider/model-a → scout:PASS, coder:PASS, reviewer:PASS
+└─ provider/model-c → scout:PASS, coder:FAIL, reviewer:PASS
+```
+
+## Limitations
+
+- Does not test role-specific capabilities
+- Does not verify tool calling support
+- Does not test reasoning quality
+- Does not validate context window size
+- Simple prompt may not trigger rate limits
+
+**Use this for**: Gateway availability check  
+**Use role-fit for**: Capability validation
